@@ -1,6 +1,7 @@
+import z from "zod";
 import { errorHandler } from "./auth.error";
 import { Request, Response } from "express";
-import { registerAuthSchema } from "./auth.schemas";
+import { loginSchema, registrationSchema } from "./auth.schemas";
 import { Session, User } from "@supabase/supabase-js";
 import { IUserProfileRoleType } from "../../types/users";
 import { supabase } from "../../libs/database/db.supabase";
@@ -14,19 +15,28 @@ import {
   verifyEmailAuthHelper,
 } from "./auth.helper";
 
-type iLogin = { email: string; password: string };
-
 //login controller
 export const loginAuthController = async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body as iLogin;
+    const parsed = loginSchema.safeParse(req.body);
 
-    if (!email || !password) {
+    if (!parsed.success) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("[Validation Error]", parsed.error.issues); // Avoid .format()
+      }
+
       return res.status(400).json({
-        status: "fail",
-        message: "Email and password are required",
+        status: "failed",
+        message: "Invalid input",
+        errors: parsed.error.issues.map((issue) => ({
+          path: issue.path.join("."),
+          message: issue.message,
+          code: issue.code,
+        })),
       });
     }
+
+    const { email, password, remember } = parsed.data;
 
     const result = await loginAuthHelper(email, password);
     const { user, session } = result as { user: User; session: Session };
@@ -46,8 +56,10 @@ export const loginAuthController = async (req: Request, res: Response) => {
 
     if (roleError) throw roleError;
 
-    const accessTokenMaxAge = 15 * 60 * 1000; // 15 minutes
-    const refreshTokenMaxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+    const accessTokenMaxAge = remember ? 24 * 60 * 60 * 1000 : 15 * 60 * 1000; // 15 minutes or 1 days
+    const refreshTokenMaxAge = remember
+      ? 30 * 24 * 60 * 60 * 1000
+      : 7 * 24 * 60 * 60 * 1000; // 7 days or 30 days
 
     res.cookie("accessToken", session.access_token, {
       httpOnly: true,
@@ -111,12 +123,21 @@ export const logoutAuthController = async (req: Request, res: Response) => {
 //register controller
 export const registerAuthController = async (req: Request, res: Response) => {
   try {
-    const parsed = registerAuthSchema.safeParse(req.body);
+    const parsed = registrationSchema.safeParse(req.body);
+
     if (!parsed.success) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("[Validation Error]", parsed.error.issues); // Avoid .format()
+      }
+
       return res.status(400).json({
-        status: "fail",
+        status: "failed",
         message: "Invalid input",
-        issues: parsed.error.issues,
+        errors: parsed.error.issues.map((issue) => ({
+          path: issue.path.join("."),
+          message: issue.message,
+          code: issue.code,
+        })),
       });
     }
 
@@ -124,6 +145,7 @@ export const registerAuthController = async (req: Request, res: Response) => {
     const result = await registerAuthHelper(email, password);
     const { user } = result as { user: User; session: Session };
 
+    //new user information to be stored on database
     const newUser = {
       user_id: user.id,
       email: email,

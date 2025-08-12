@@ -104,6 +104,7 @@ export const logoutAuthHelper = async (): Promise<LogoutResult> => {
 /**
  * Registers a new user with Supabase.
  * @param email - New user's email
+ * @param fullname - New fullname
  * @param password - New user's password
  * @returns User session on successful signup
  * @throws AuthError with descriptive feedback
