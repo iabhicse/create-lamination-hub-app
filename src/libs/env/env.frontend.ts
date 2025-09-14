@@ -5,7 +5,7 @@ dotenv.config();
 // ✅ Load environment variables from .env file
 // ✅ Define schema with defaults and transformations
 const envConfigSchema = z.object({
-  NEXT_PUBLIC_FRONTEND: z.url().trim().default("http://localhost:3000"),
+  FRONTEND_URL: z.url().trim().default("http://localhost:3000"),
   FRONTEND_API_URL: z.url().trim().default("http://localhost:3000/api"),
 });
 
@@ -22,7 +22,7 @@ if (!parsed.success) {
 
 // ✅ Export validated config
 export const envFrontendConfig = Object.freeze({
-  APP_FRONTEND: parsed.data.NEXT_PUBLIC_FRONTEND,
+  APP_FRONTEND: parsed.data.FRONTEND_URL,
   APP_FRONTEND_API_URL: parsed.data.FRONTEND_API_URL,
 });
 
