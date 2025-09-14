@@ -1,13 +1,13 @@
 import dotenv from "dotenv";
 import process from "process";
 import appPromise from "./app";
-import { envAppConfig } from "./libs/configs/configs.env";
+import { envAppConfig } from "./libs/env/env.app";
 
 // ✅ Load environment variables early
 dotenv.config();
 
 // Validate essential env variables
-if (!envAppConfig.APP_PORT || !envAppConfig.APP_API_PATH) {
+if (!envAppConfig.APP_PORT || !envAppConfig.API_PATH) {
   console.error("Missing required environment configuration.");
   process.exit(1);
 }

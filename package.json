@@ -1,6 +1,6 @@
 {
   "name": "create-express-vercel-2025",
-  "version": "1.0.1",
+  "version": "2.0.1",
   "description": "Backend Server template 2025 with express and typescrpt to host on vercel serverless functions",
   "module": "src/server.ts",
   "main": "api/index.js",

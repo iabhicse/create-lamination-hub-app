@@ -1,6 +1,6 @@
 // routes/testRoutes.ts
 import { Router } from "express";
-import { supabase } from "../../libs/database/db.supabase";
+import { supabase } from "../../libs/db/db.supabase";
 
 const testRoutes: ReturnType<typeof Router> = Router();
 
@@ -24,7 +24,6 @@ testRoutes.get("/supabase-test", async (_, res) => {
 // ➕ Inserting a test user
 testRoutes.post("/supabase-test", async (req, res) => {
   const { email, username } = req.body as { email: string; username: string };
-  console.log(email, username);
 
   if (!email || !username) {
     return res.status(400).json({

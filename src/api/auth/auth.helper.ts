@@ -1,50 +1,149 @@
-import { supabase } from "../../libs/database/db.supabase";
-import { AuthResponse, UserResponse } from "@supabase/supabase-js";
+import { AuthError, UserResponse } from "@supabase/supabase-js";
+import { supabase } from "../../libs/db/db.supabase";
+import { IUserRegistration, IUserSignin, IUserSignup } from "../../types/users";
+import e from "express";
 
-// Custom error type
-interface AuthError {
-  message: string;
-  status?: number;
-}
-
-interface LogoutResult {
-  success: boolean;
-  message: string;
-}
-
-// Controller return type
-type LoginResult = AuthResponse["data"] | null;
-type RegisterResult = AuthResponse["data"] | null;
-interface VerificationResult {
-  verified: boolean;
-  email?: string;
-}
-interface ResetPasswordResult {
-  message: string;
-}
-interface ForgotPasswordResult {
-  message: string;
-}
-
-/**
- * Attempts to log in a user via Supabase.
- * @param email - User's email
- * @param password - User's password
- * @returns Supabase user session on success
- * @throws AuthError with descriptive message
- */
-export const loginAuthHelper = async (
-  email: string,
-  password: string
-): Promise<LoginResult> => {
-  if (!email || !password) {
-    throw {
-      message: "Email and password are required for login.",
-      status: 400,
-    } satisfies AuthError;
-  }
-
+export const refreshTokenUser = async (params: { refreshToken: string }) => {
+  const { refreshToken } = params;
   try {
+    const { data, error } = await supabase.auth.refreshSession({
+      refresh_token: refreshToken,
+    });
+
+    if (error) {
+      throw new AuthError("Refresh token not found or unauthorized", 401);
+    }
+
+    return {
+      success: true,
+      message: "access token refresh successfully",
+      data: data,
+    };
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message:
+        fallback?.message || "Unexpected error during fetching refresh token.",
+    };
+  }
+};
+
+export const getUserProfile = async (email: string) => {
+  try {
+    if (!email) throw new AuthError("Email not found or unauthorized", 401);
+
+    const { data: userData, error: userError } = await supabase
+      .from("iLocalUsers")
+      .select("id, role, fullname, avatar")
+      .eq("email", email)
+      .single();
+
+    if (userError) throw userError;
+    return userData;
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message: fallback?.message || "Unexpected error during getUserProfile.",
+    };
+  }
+};
+
+export const getUserByToken = async (token: string) => {
+  try {
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(token);
+
+    if (error || !user) {
+      throw new AuthError("User not found or unauthorized", 401);
+    }
+
+    if (!user.email) {
+      throw new AuthError("User email not found or unauthorized", 401);
+    }
+    return user;
+  } catch (error) {
+    const fallback = error as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message: fallback?.message || "Unexpected error during fetching user.",
+    };
+  }
+};
+
+export const registerUser = async (user: IUserSignup) => {
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email: user.email,
+      password: user.password,
+    });
+
+    if (error) {
+      throw {
+        success: false,
+        statusCode: 400,
+        message: error.message,
+        error,
+      };
+    }
+
+    return {
+      success: true,
+      statusCode: 201,
+      message: "User registered successfully",
+      data,
+    };
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message: fallback?.message || "Unexpected error during register.",
+    };
+  }
+};
+
+export const setUserToiLocalUser = async (
+  newUser: IUserRegistration
+): Promise<any> => {
+  const { error: insertError } = await supabase
+    .from("iLocalUsers")
+    .insert([newUser])
+    .single();
+
+  if (insertError) {
+    throw insertError;
+  }
+};
+
+export const signoutUser = async () => {
+  try {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      const fallback = error as AuthError;
+      throw {
+        status: fallback?.status || 500,
+        message: fallback?.message || "Logout failed due to database error.",
+      };
+    }
+
+    return { success: true, message: "user logged out successfully" };
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message: fallback?.message || "Unexpected error during signout.",
+    };
+  }
+};
+
+export const signinUser = async (user: IUserSignin) => {
+  try {
+    const { email, password } = user;
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -52,108 +151,28 @@ export const loginAuthHelper = async (
 
     if (error) {
       throw {
-        message:
-          error.message || "Login failed. Please check your credentials.",
-        status: error.status || 401,
-      } satisfies AuthError;
-    }
-
-    if (!data?.session) {
-      throw {
-        message: "No active session returned. Login may have failed silently.",
-        status: 500,
-      } satisfies AuthError;
-    }
-
-    return data;
-  } catch (err: unknown) {
-    const fallback = err as AuthError;
-    throw {
-      message: fallback?.message || "Unexpected error during login.",
-      status: fallback?.status || 500,
-    };
-  }
-};
-
-/**
- * Logs out the current user session.
- * @returns success status on successful logout
- * @throws AuthError with helpful message
- */
-export const logoutAuthHelper = async (): Promise<LogoutResult> => {
-  try {
-    const { error } = await supabase.auth.signOut();
-
-    if (error) {
-      throw {
-        message: error.message || "Logout failed due to Supabase error.",
+        success: false,
         status: error.status || 500,
-      } satisfies AuthError;
+        message: error.message,
+        data: null,
+      };
     }
 
-    return { success: true, message: "user logged out successfully" };
+    return {
+      success: true,
+      message: "user logged in successfully",
+      data: data,
+    };
   } catch (err: unknown) {
     const fallback = err as AuthError;
     throw {
-      message: fallback?.message || "Unexpected error during logout.",
       status: fallback?.status || 500,
+      message: fallback?.message || "Unexpected error during signin.",
     };
   }
 };
 
-/**
- * Registers a new user with Supabase.
- * @param email - New user's email
- * @param fullname - New fullname
- * @param password - New user's password
- * @returns User session on successful signup
- * @throws AuthError with descriptive feedback
- */
-export const registerAuthHelper = async (
-  email: string,
-  password: string
-): Promise<RegisterResult> => {
-  if (!email || !password) {
-    throw {
-      message: "Email and password are required to register.",
-      status: 400,
-    } satisfies AuthError;
-  }
-
-  try {
-    const { data, error } = await supabase.auth.signUp({ email, password });
-
-    if (error) {
-      throw {
-        message: error.message || "Registration failed. Try a different email.",
-        status: error.status || 409,
-      } satisfies AuthError;
-    }
-
-    if (!data?.user) {
-      throw {
-        message:
-          "No user object returned. Something went wrong during registration.",
-        status: 500,
-      } satisfies AuthError;
-    }
-
-    return data;
-  } catch (err: unknown) {
-    const fallback = err as AuthError;
-    throw {
-      message: fallback?.message || "Unexpected error during registration.",
-      status: fallback?.status || 500,
-    };
-  }
-};
-
-/**
- * Checks if the current user has verified their email.
- * @returns { verified: boolean, email?: string }
- * @throws AuthError with structured message
- */
-export const verifyEmailAuthHelper = async (): Promise<VerificationResult> => {
+export const verifyUserEmail = async () => {
   try {
     const {
       data: { user },
@@ -164,14 +183,14 @@ export const verifyEmailAuthHelper = async (): Promise<VerificationResult> => {
       throw {
         message: error.message || "Failed to retrieve user data.",
         status: error.status || 401,
-      } satisfies AuthError;
+      };
     }
 
     if (!user || !user.email) {
       throw {
         message: "User is not logged in or email is unavailable.",
         status: 403,
-      } satisfies AuthError;
+      };
     }
 
     return {
@@ -187,21 +206,13 @@ export const verifyEmailAuthHelper = async (): Promise<VerificationResult> => {
     };
   }
 };
-/**
- * Resets user password via accessToken-based recovery flow.
- * Must be called in client-side context where recovery token is already set.
- * @param newPassword - New password to set
- * @returns Confirmation message
- * @throws AuthError if reset fails
- */
-export const resetPasswordAuthHelper = async (
-  newPassword: string
-): Promise<ResetPasswordResult> => {
+
+export const resetUserPassword = async (newPassword: string) => {
   if (!newPassword) {
     throw {
       message: "New password is required.",
       status: 400,
-    } satisfies AuthError;
+    };
   }
 
   try {
@@ -211,7 +222,7 @@ export const resetPasswordAuthHelper = async (
       throw {
         message: error.message || "Password reset failed.",
         status: error.status || 401,
-      } satisfies AuthError;
+      };
     }
 
     return { message: "Password reset successful." };
@@ -224,20 +235,12 @@ export const resetPasswordAuthHelper = async (
   }
 };
 
-/**
- * Sends a password recovery email to the provided address.
- * @param email - User's email address
- * @returns Success message if email was dispatched
- * @throws AuthError if recovery fails
- */
-export const forgotPasswordAuthHelper = async (
-  email: string
-): Promise<ForgotPasswordResult> => {
+export const forgetUserPassword = async (email: string) => {
   if (!email) {
     throw {
       message: "Email is required to initiate password recovery.",
       status: 400,
-    } satisfies AuthError;
+    };
   }
 
   try {
@@ -247,7 +250,7 @@ export const forgotPasswordAuthHelper = async (
       throw {
         message: error.message || "Failed to send recovery email.",
         status: error.status || 422,
-      } satisfies AuthError;
+      };
     }
 
     return { message: "Recovery email sent successfully." };

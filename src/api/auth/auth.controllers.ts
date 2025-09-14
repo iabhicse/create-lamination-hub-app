@@ -1,19 +1,29 @@
-import z from "zod";
-import { errorHandler } from "./auth.error";
-import { Request, Response } from "express";
+import { CookieOptions, Request, Response } from "express";
+import { supabase } from "../../libs/db/db.supabase";
+import { AuthError, Session, User } from "@supabase/supabase-js";
+import { IUserProfileRoleType, IUserSignin } from "../../types/users";
 import { loginSchema, registrationSchema } from "./auth.schemas";
-import { Session, User } from "@supabase/supabase-js";
-import { IUserProfileRoleType } from "../../types/users";
-import { supabase } from "../../libs/database/db.supabase";
 
 import {
-  forgotPasswordAuthHelper,
-  loginAuthHelper,
-  logoutAuthHelper,
-  registerAuthHelper,
-  resetPasswordAuthHelper,
-  verifyEmailAuthHelper,
+  forgetUserPassword,
+  getUserProfile,
+  registerUser,
+  resetUserPassword,
+  signinUser,
+  signoutUser,
+  verifyUserEmail,
 } from "./auth.helper";
+import {
+  getCookieExpiryInDays,
+  getCookieExpiryInMinutes,
+} from "../../libs/utils/utils.app";
+
+const cookieOptions: CookieOptions = {
+  httpOnly: true,
+  secure: true,
+  sameSite: "none",
+  path: "/",
+};
 
 //login controller
 export const loginAuthController = async (req: Request, res: Response) => {
@@ -36,87 +46,75 @@ export const loginAuthController = async (req: Request, res: Response) => {
       });
     }
 
-    const { email, password, remember } = parsed.data;
-
-    const result = await loginAuthHelper(email, password);
-    const { user, session } = result as { user: User; session: Session };
+    const { email, password, remember } = req.body as IUserSignin;
+    const result = await signinUser({ email, password });
+    const { user, session } = result.data as { user: User; session: Session };
 
     if (!session?.access_token || !session?.refresh_token) {
       return res.status(500).json({
         status: "error",
         message: "Token generation failed",
+        data: null,
       });
     }
 
-    const { data: roleData, error: roleError } = await supabase
-      .from("iLocalUsers")
-      .select("id, role")
-      .eq("email", email)
-      .single();
+    const userDatafromDB = await getUserProfile(email);
 
-    if (roleError) throw roleError;
+    const accessTokenExpiresIn = remember
+      ? getCookieExpiryInDays(1)
+      : getCookieExpiryInMinutes(15);
 
-    const accessTokenMaxAge = remember ? 24 * 60 * 60 * 1000 : 15 * 60 * 1000; // 15 minutes or 1 days
-    const refreshTokenMaxAge = remember
-      ? 30 * 24 * 60 * 60 * 1000
-      : 7 * 24 * 60 * 60 * 1000; // 7 days or 30 days
-
-    res.cookie("accessToken", session.access_token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      path: "/",
-      maxAge: accessTokenMaxAge,
+    res.cookie("accesstoken", session.access_token, {
+      ...cookieOptions,
+      maxAge: accessTokenExpiresIn,
     });
-
-    res.cookie("refreshToken", session.refresh_token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      path: "/",
-      maxAge: refreshTokenMaxAge,
+    res.cookie("refreshtoken", session.refresh_token, {
+      ...cookieOptions,
+      maxAge: remember ? getCookieExpiryInDays(30) : getCookieExpiryInDays(7),
     });
 
     const currentUser = {
-      id: roleData?.id,
+      id: userDatafromDB?.id,
       email,
-      role: (roleData?.role ?? "USER") as IUserProfileRoleType,
+      role: (userDatafromDB?.role ?? "USER") as IUserProfileRoleType,
+      fullname: userDatafromDB?.fullname ?? "",
+      avatar: userDatafromDB?.avatar ?? null,
       created_at: user.created_at,
       updated_at: user.updated_at,
       isUserVerified: user.user_metadata?.isUserVerified ?? false,
     };
 
     return res.status(200).json({
-      status: "success",
-      message: "Login successful",
-      data: { currentUser },
+      success: true,
+      message: "User signed in successfully.",
+      tokenExpiresIn: accessTokenExpiresIn,
+      data: currentUser,
     });
-  } catch (error: unknown) {
-    errorHandler(error, req, res);
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message: fallback?.message || "Unexpected error during login.",
+    };
   }
 };
 
 //logout controller
 export const logoutAuthController = async (req: Request, res: Response) => {
   try {
-    const result = await logoutAuthHelper();
+    const result = await signoutUser();
 
     return res.status(200).json({
       status: "success",
       message: "Logout successful",
       data: result,
     });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown internal error";
-
-    console.error("Logout error:", error);
-
-    return res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-      details: message,
-    });
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message: fallback?.message || "Unexpected error during logout.",
+    };
   }
 };
 
@@ -141,9 +139,11 @@ export const registerAuthController = async (req: Request, res: Response) => {
       });
     }
 
-    const { email, fullname, password } = parsed.data;
-    const result = await registerAuthHelper(email, password);
-    const { user } = result as { user: User; session: Session };
+    const { email, fullname } = parsed.data;
+
+    const result = await registerUser(parsed.data);
+
+    const { user } = result.data as { user: User };
 
     //new user information to be stored on database
     const newUser = {
@@ -169,8 +169,12 @@ export const registerAuthController = async (req: Request, res: Response) => {
       message: "Registration successful",
       data: newUser,
     });
-  } catch (error) {
-    return errorHandler(error, req, res);
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message: fallback?.message || "Unexpected error during registeration.",
+    };
   }
 };
 
@@ -179,24 +183,20 @@ export const verifyEmailAuthController = async (
   res: Response
 ) => {
   try {
-    const result = await verifyEmailAuthHelper();
+    const result = await verifyUserEmail();
 
     return res.status(200).json({
-      status: "success",
+      success: true,
       message: "Email verification successful",
       data: result,
     });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown internal error";
-
-    console.error("Verify email error:", error);
-
-    return res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-      details: message,
-    });
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message:
+        fallback?.message || "Unexpected error during email verification.",
+    };
   }
 };
 
@@ -209,29 +209,25 @@ export const resetPasswordAuthController = async (
 
     if (!newPassword) {
       return res.status(400).json({
-        status: "fail",
+        success: false,
         message: "New password is required",
+        data: null,
       });
     }
 
-    const result = await resetPasswordAuthHelper(newPassword);
+    const result = await resetUserPassword(newPassword);
 
     return res.status(200).json({
-      status: "success",
+      success: true,
       message: "Password reset successful",
       data: result,
     });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown internal error";
-
-    console.error("Reset password error:", error);
-
-    return res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-      details: message,
-    });
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message: fallback?.message || "Unexpected error during password reset.",
+    };
   }
 };
 
@@ -244,28 +240,25 @@ export const forgotPasswordAuthController = async (
 
     if (!email) {
       return res.status(400).json({
-        status: "fail",
+        success: false,
         message: "Email is required",
+        data: null,
       });
     }
 
-    const result = await forgotPasswordAuthHelper(email);
+    const result = await forgetUserPassword(email);
 
     return res.status(200).json({
-      status: "success",
+      success: true,
       message: "Password recovery email sent",
       data: result,
     });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown internal error";
-
-    console.error("Forgot password error:", error);
-
-    return res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-      details: message,
-    });
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message:
+        fallback?.message || "Unexpected error during password recovery.",
+    };
   }
 };
