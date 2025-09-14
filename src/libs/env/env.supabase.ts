@@ -5,8 +5,8 @@ dotenv.config();
 // ✅ Load environment variables from .env file
 // ✅ Define schema with defaults and transformations
 const envConfigSchema = z.object({
-  SUPABASE_URL: z.url().trim().default("http://localhost:54321"),
-  SUPABASE_ANON_KEY: z.string().default("anon-key"),
+  DB_SUPABASE_URL: z.url().trim().default("http://localhost:54321"),
+  DB_SUPABASE_ANON_KEY: z.string().default("anon-key"),
 });
 
 // ✅ Validate process.env safely
@@ -21,7 +21,11 @@ if (!parsed.success) {
 }
 
 // ✅ Export validated config
-export const envSupabaseConfig = Object.freeze(parsed.data);
+export const envSupabaseConfig = Object.freeze({
+  SUPABASE_URL: parsed.data.DB_SUPABASE_URL,
+  SUPABASE_ANON_KEY: parsed.data.DB_SUPABASE_ANON_KEY
+}
+);
 
 // ✅ Optional: Export type (for type-safe config)
-export type EnvSupabaseConfig = z.infer<typeof envConfigSchema>;
+export type EnvSupabaseConfig = z.infer<typeof envSupabaseConfig>;
