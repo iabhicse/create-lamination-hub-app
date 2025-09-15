@@ -1,6 +1,6 @@
 import { Router } from "express";
-import * as authControllers from "./auth.controllers";
 import createAuthErrorHandler from "./auth.error";
+import * as authControllers from "./auth.controllers";
 
 const authRoutes: ReturnType<typeof Router> = Router();
 
@@ -34,6 +34,17 @@ authRoutes.post(
   "/forgot-password",
   authControllers.forgotPasswordAuthController,
   createAuthErrorHandler("forgotPassword")
+);
+authRoutes.post(
+  "/profile",
+  authControllers.profileAuthController,
+  createAuthErrorHandler("profile")
+);
+
+authRoutes.post(
+  "/refresh",
+  authControllers.refreshTokenAuthController,
+  createAuthErrorHandler("refreshToken")
 );
 
 export default authRoutes;

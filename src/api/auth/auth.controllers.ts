@@ -1,12 +1,14 @@
-import { CookieOptions, Request, Response } from "express";
 import { supabase } from "../../libs/db/db.supabase";
+import { CookieOptions, Request, Response } from "express";
 import { AuthError, Session, User } from "@supabase/supabase-js";
-import { IUserProfileRoleType, IUserSignin } from "../../types/users";
 import { loginSchema, registrationSchema } from "./auth.schemas";
+import { IUserProfileRoleType, IUserSignin } from "../../types/users";
 
 import {
   forgetUserPassword,
+  getUserByToken,
   getUserProfile,
+  refreshTokenUser,
   registerUser,
   resetUserPassword,
   signinUser,
@@ -253,6 +255,100 @@ export const forgotPasswordAuthController = async (
       message: "Password recovery email sent",
       data: result,
     });
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message:
+        fallback?.message || "Unexpected error during password recovery.",
+    };
+  }
+};
+
+export const profileAuthController = async (req: Request, res: Response) => {
+  try {
+
+    const token = req.cookies.accesstoken as string;
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Unauthorized", data: null });
+    }
+
+    const user = await getUserByToken(token);
+
+    const { email } = user;
+    const userDatafromDB = await getUserProfile(email!);
+
+    const currentUser = {
+      id: userDatafromDB?.id,
+      email: user.email,
+      role: (userDatafromDB?.role ?? "USER") as IUserProfileRoleType,
+      fullname: userDatafromDB?.fullname ?? "",
+      avatar: userDatafromDB?.avatar ?? null,
+      created_at: user.created_at,
+      updated_at: user.updated_at,
+      isUserVerified: user.user_metadata?.isUserVerified ?? false,
+    };
+
+    return res.status(200).json({
+      success: true,
+      message: "User profile fetched successfully",
+      data: currentUser,
+    });
+  } catch (err: unknown) {
+    const fallback = err as AuthError;
+    throw {
+      status: fallback?.status || 500,
+      message: fallback?.message || "Unexpected error during profile fetch.",
+    };
+  }
+};
+
+export const refreshTokenAuthController = async (
+  req: Request,
+  res: Response
+) => {
+
+  try {
+
+    const refreshToken = req.cookies.refreshtoken as string;
+    // Defensive fallback for remember flag
+    const remember =
+      typeof req.body === "object" && req.body !== null && "remember" in req.body
+        ? Boolean((req.body as { remember?: boolean }).remember)
+        : false;
+
+    if (!refreshToken) {
+      return res.status(401).json({ success: false, message: "Unauthorized", data: null });
+    }
+
+    const result = await refreshTokenUser({ refreshToken });
+    const { session } = result.data as { session: Session };
+    if (!session?.access_token || !session?.refresh_token) {
+      return res.status(500).json({
+        success: false,
+        status: "error",
+        message: "Token generation failed",
+        data: null,
+      });
+    }
+
+    const accessTokenExpiresIn = remember ? getCookieExpiryInDays(1) : getCookieExpiryInMinutes(15);
+
+    res.cookie("accesstoken", session.access_token, {
+      maxAge: accessTokenExpiresIn,
+    });
+
+    res.cookie("refreshtoken", session.refresh_token, {
+      maxAge: remember ? getCookieExpiryInDays(30) : getCookieExpiryInDays(7),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Tokens are refreshed successfully",
+      tokenExpiresIn: accessTokenExpiresIn,
+      data: null,
+    });
+
   } catch (err: unknown) {
     const fallback = err as AuthError;
     throw {
