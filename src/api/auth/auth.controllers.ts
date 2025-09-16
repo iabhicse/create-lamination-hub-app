@@ -107,7 +107,7 @@ export const logoutAuthController = async (req: Request, res: Response) => {
     const result = await signoutUser();
 
     return res.status(200).json({
-      status: "success",
+      success: true,
       message: "Logout successful",
       data: result,
     });
@@ -131,7 +131,7 @@ export const registerAuthController = async (req: Request, res: Response) => {
       }
 
       return res.status(400).json({
-        status: "failed",
+        success: false,
         message: "Invalid input",
         errors: parsed.error.issues.map((issue) => ({
           path: issue.path.join("."),
@@ -167,7 +167,7 @@ export const registerAuthController = async (req: Request, res: Response) => {
     }
 
     return res.status(201).json({
-      status: "success",
+      success: true,
       message: "Registration successful",
       data: newUser,
     });
